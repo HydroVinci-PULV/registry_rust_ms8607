@@ -1,0 +1,15 @@
+[package]
+name = "ms8607"
+version = "0.1.0"
+edition = "2021"
+description = "A platform agnostic driver for the MS8607 Pressure, Temperature, and Humidity Sensor from TE Connectivity"
+authors = ["Antoine Raulin <contact@araulin.eu>"]
+repository = "https://github.com/HydroVinci-PULV/registry_rust_ms8607"
+keywords=["embedded-hal-driver", "pressure", "temperature", "humidity", "sensor"]
+categories = ["embedded", "hardware-support", "no-std"]
+readme="README.md"
+license-file="LICENSE"
+
+
+[dependencies]
+embedded-hal = { version = "0.2.7" }
