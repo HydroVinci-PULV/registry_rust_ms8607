@@ -5,10 +5,14 @@ edition = "2021"
 description = "A platform agnostic driver for the MS8607 Pressure, Temperature, and Humidity Sensor from TE Connectivity"
 authors = ["Antoine Raulin <contact@araulin.eu>"]
 repository = "https://github.com/HydroVinci-PULV/registry_rust_ms8607"
+homepage = "https://github.com/HydroVinci-PULV/registry_rust_ms8607"
 keywords=["embedded-hal-driver", "pressure", "temperature", "humidity", "sensor"]
 categories = ["embedded", "hardware-support", "no-std"]
 readme="README.md"
 license-file="LICENSE"
+exclude = [
+    "assets/**/*",
+]
 
 
 [dependencies]
