@@ -9,11 +9,22 @@ homepage = "https://github.com/HydroVinci-PULV/registry_rust_ms8607"
 keywords=["embedded-hal-driver", "pressure", "temperature", "humidity", "sensor"]
 categories = ["embedded", "hardware-support", "no-std"]
 readme="README.md"
-license-file="LICENSE"
+license="GPL-3.0"
 exclude = [
     "assets/**/*",
+    ".cargo/**/*",
+    "memory.x",
 ]
 
 
 [dependencies]
-embedded-hal = { version = "0.2.7" }
+embedded-hal = "0.2.7"
+
+[dev-dependencies]
+# Used for examples
+cortex-m = "0.7.7"
+cortex-m-rt = "0.7.2"
+fugit = "0.3.6"
+panic-halt = "0.2.0"
+rp-pico = "0.6.0"
+rp2040-hal = "0.7.0"
