@@ -1,6 +1,6 @@
 [package]
 name = "ms8607"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "A platform agnostic driver for the MS8607 Pressure, Temperature, and Humidity Sensor from TE Connectivity"
 authors = ["Antoine Raulin <contact@araulin.eu>"]
