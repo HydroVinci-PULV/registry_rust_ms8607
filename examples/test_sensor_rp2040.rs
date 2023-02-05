@@ -10,6 +10,7 @@
 #![no_main]
 // The writeln! trait.
 use core::fmt::Write as FmtWrite;
+use cortex_m_semihosting::hprintln;
 // The macro for our start-up function
 use rp_pico::entry;
 
@@ -88,26 +89,10 @@ fn main() -> ! {
     let sda_pin = pins.gpio2.into_mode::<hal::gpio::FunctionI2C>();
     let scl_pin = pins.gpio3.into_mode::<hal::gpio::FunctionI2C>();
 
-
-    let uart_pins = (
-        // UART TX (characters sent from RP2040) on pin 1 (GPIO0)
-        pins.gpio0.into_mode::<hal::gpio::FunctionUart>(),
-        // UART RX (characters received by RP2040) on pin 2 (GPIO1)
-        pins.gpio1.into_mode::<hal::gpio::FunctionUart>(),
-    );
-
-    // Make a UART on the given pins
-    let mut uart = hal::uart::UartPeripheral::new(pac.UART0, uart_pins, &mut pac.RESETS)
-        .enable(
-            UartConfig::new(115200.Hz(), DataBits::Eight, None, StopBits::One),
-            clocks.peripheral_clock.freq(),
-        )
-        .unwrap();
-
      // Create the I²C drive, using the two pre-configured pins. This will fail
     // at compile time if the pins are in the wrong mode, or if this I²C
     // peripheral isn't available on these pins!
-    let mut i2c = hal::I2C::i2c1(
+    let i2c = hal::I2C::i2c1(
         pac.I2C1,
         sda_pin,
         scl_pin,
@@ -116,43 +101,42 @@ fn main() -> ! {
         &clocks.system_clock,
     );
 
+    // Allow the I²C peripheral to be shared between drivers
+    let bus_i2c = shared_bus::BusManagerSimple::new(i2c);
+
     // ? BOILERPLATE END ? //
 
-    writeln!(uart, "MS8607 test!\r").unwrap();
+    hprintln!("MS8607 test!\r");
     let hz = clocks.system_clock.freq().to_Hz();
-    writeln!(uart, "System clock: {hz} Hz\r").unwrap();
+    hprintln!("System clock: {hz} Hz\r");
     // Try to initialize!
-    let mut ms8607 = MS8607::new();
-    writeln!(uart, "MS8607 init...\r").unwrap();
-    let begin = ms8607.begin(&mut i2c, &mut delay);
+    let mut ms8607 = MS8607::new(bus_i2c.acquire_i2c());
+    hprintln!("MS8607 init...\r");
+    let begin = ms8607.begin(&mut delay);
     match begin {
-        Ok(_) => writeln!(uart, "MS8607 init OK\r").unwrap(),
+        Ok(_) => hprintln!("MS8607 init OK\r"),
         Err(_) => {
-            writeln!(uart, "MS8607 init failed\r").unwrap();
+            hprintln!("MS8607 init failed\r");
             panic!();
         }
     }
 
-    writeln!(uart, "MS8607 found\r").unwrap();
+    hprintln!("MS8607 found\r");
 
     // wait 2s
     delay.delay_ms(2000u32);
 
     loop {
-        let req = ms8607.get_measurements(&mut i2c, &mut delay);
+        let req = ms8607.get_measurements(&mut delay);
         let (pres, temp, hum) = match req {
             Ok((pres, temp, hum)) => (pres, temp, hum),
             Err(_) => {
-                writeln!(uart, "Error retrieving measurements").unwrap();
+                hprintln!("Error retrieving measurements");
                 panic!();
             }
         };
         // serial print out the data with 2 decimal places
-        writeln!(
-            uart,
-            "Pressure: {pres:.2} Pa, Temperature: {temp:.2} C, Humidity: {hum:.2} %RH\r"
-        )
-        .unwrap();
+        hprintln!("Pressure: {pres:.2} Pa, Temperature: {temp:.2} C, Humidity: {hum:.2} %RH\r");
         delay.delay_ms(5000u32);
     }
 }

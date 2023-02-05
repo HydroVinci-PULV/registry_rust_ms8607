@@ -9,7 +9,7 @@
 
 #![no_std]
 #![allow(unused)]
-use embedded_hal::blocking::{i2c::{Write, WriteRead}, delay::DelayMs};
+use embedded_hal::blocking::{i2c, delay::DelayMs};
 
 
 /// Enum containing all possible types of errors when interacting with the sensor
@@ -29,8 +29,23 @@ impl<E> From<E> for Error<E> {
         Error::CommunicationError(e)
     }
 }
-pub struct MS8607
+/// A platform agnostic Rust driver for the MS8607 Pressure, Temperature, and Humidity Sensor from TE Connectivity.
+/// 
+/// ## Example
+/// ```rust
+/// // Create a new instance of the MS8607 driver
+/// let mut ms8607 = MS8607::new(i2c);
+/// // Initialize and calibrate the sensor
+/// let begin = ms8607.begin(&mut delay);
+/// // Init OK, sensor foun
+///
+/// // Get measurements
+/// let (pres, temp, hum) = ms8607.get_measurements(&mut delay).unwrap();
+/// hprintln!("Pressure: {pres:.2} Pa, Temperature: {temp:.2} C, Humidity: {hum:.2} %RH\r");
+/// ```
+pub struct MS8607<I2C>
 {
+    i2c: I2C,
     // calibration constants
     press_sens: u16,
     press_offset: u16,
@@ -49,11 +64,14 @@ pub struct MS8607
     _humidity: f64,
 }
 
-impl MS8607
+impl<I2C, E> MS8607<I2C>
+where
+    I2C: i2c::Write<Error = E> + i2c::WriteRead<Error = E>,
 {
     /// Create a new MS8607 instance
-    pub fn new() -> Self {
+    pub fn new(i2c:I2C) -> Self {
         MS8607 {
+            i2c,
             press_sens: 0,
             press_offset: 0,
             press_sens_temp_coeff: 0,
@@ -69,20 +87,19 @@ impl MS8607
     }
 
     /// Sets up the hardware and initializes I2C
-    pub fn begin<I2C,Delay, E>(&mut self, i2c:&mut I2C, delay:&mut Delay) -> Result<(), Error<E>> where
-    I2C: Write<Error = E> + WriteRead<Error = E>, Delay: DelayMs<u16> {
-        self.reset(i2c, delay)?;
-        self.init(i2c)?;
+    pub fn begin<Delay>(&mut self, delay:&mut Delay) -> Result<(), Error<E>> where
+    Delay: DelayMs<u16> {
+        self.reset(delay)?;
+        self.init()?;
         Ok(())
     }
 
     /// Initializer for post i2c/spi init
-    pub fn init<I2C, E>(&mut self, i2c:&mut I2C) -> Result<(), Error<E>> where
-    I2C: Write<Error = E> + WriteRead<Error = E>,{
-        self._fetch_temp_calibration_values(i2c)?;
+    pub fn init(&mut self) -> Result<(), Error<E>>{
+        self._fetch_temp_calibration_values()?;
         self.enable_humidity_clock_stretching(false);
 
-        self.set_humidity_resolution(i2c, Ms8607HumidityResolution::Osr12b)?;
+        self.set_humidity_resolution( Ms8607HumidityResolution::Osr12b)?;
 
         self.set_pressure_resolution(Ms8607PressureResolution::Osr4096);
 
@@ -106,19 +123,18 @@ impl MS8607
     ///
     /// ## Arguments
     /// resolution: the resolution to set
-    pub fn set_humidity_resolution<I2C, E>(
-        &mut self, i2c:&mut I2C,
+    pub fn set_humidity_resolution(
+        &mut self,
         resolution: Ms8607HumidityResolution,
-    )  -> Result<(), Error<E>> where
-    I2C: Write<Error = E> + WriteRead<Error = E>, {
-        let mut reg_value = self._read_humidity_user_register(i2c)?;
+    )  -> Result<(), Error<E>> {
+        let mut reg_value = self._read_humidity_user_register()?;
 
         // unset current value
         reg_value &= _MS8607::HSENSOR_USER_REG_RESOLUTION_MASK;
         // set new value
         reg_value |= resolution as u8 & _MS8607::HSENSOR_USER_REG_RESOLUTION_MASK;
 
-        self._write_humidity_user_register(i2c, reg_value)
+        self._write_humidity_user_register( reg_value)
     }
 
     /// Set the resolution for pressure readings
@@ -130,9 +146,8 @@ impl MS8607
     }
 
     /// Get the currently set resolution for humidity readings
-    pub fn get_humidity_resolution<I2C, E>(&mut self, i2c:&mut I2C) -> Result<Ms8607HumidityResolution, Error<E>> where
-    I2C: Write<Error = E> + WriteRead<Error = E>, {
-        let reg_value = self._read_humidity_user_register(i2c)?;
+    pub fn get_humidity_resolution(&mut self) -> Result<Ms8607HumidityResolution, Error<E>>{
+        let reg_value = self._read_humidity_user_register()?;
         let resolution = reg_value & _MS8607::HSENSOR_USER_REG_RESOLUTION_MASK;
         match resolution {
             0 => Ok(Ms8607HumidityResolution::Osr12b),
@@ -148,45 +163,45 @@ impl MS8607
         self.psensor_resolution_osr
     }
 
-    pub fn get_measurements<I2C,Delay, E>(&mut self, i2c:&mut I2C, delay:&mut Delay) -> Result<(f64, f64, f64), Error<E>> where
-    I2C: Write<Error = E> + WriteRead<Error = E>,Delay: DelayMs<u16> {
-        self._read(i2c, delay)?;
-        self._read_humidity(i2c)?;
+    pub fn get_measurements<Delay>(&mut self,delay:&mut Delay) -> Result<(f64, f64, f64), Error<E>> where
+    Delay: DelayMs<u16> {
+        self._read( delay)?;
+        self._read_humidity()?;
         Ok((self._pressure, self._temperature, self._humidity))
     }
 
     /**
     Read the current pressure and temperature
     */
-    fn _read<I2C,Delay, E>(&mut self, i2c:&mut I2C, delay:&mut Delay) -> Result<(), Error<E>> where
-    I2C: Write<Error = E> + WriteRead<Error = E>, Delay: DelayMs<u16> {
+    fn _read<Delay>(&mut self, delay:&mut Delay) -> Result<(), Error<E>> where
+     Delay: DelayMs<u16> {
         let mut cmd = [0u8; 1];
         let mut buffer = [0u8; 3];
 
         // First read temperature
         cmd[0] = self.psensor_resolution_osr as u8 * 2;
         cmd[0] |= _MS8607::PSENSOR_START_TEMPERATURE_ADC_CONVERSION;
-        i2c.write(_MS8607::PT_ADDRESS, &cmd).map_err(Error::from)?;
+        self.i2c.write(_MS8607::PT_ADDRESS, &cmd).map_err(Error::from)?;
         
         // wait 18ms
         delay.delay_ms(20);
 
         cmd = [_MS8607::PSENSOR_READ_ADC];
-        i2c.write_read(_MS8607::PT_ADDRESS, &cmd, &mut buffer).map_err(Error::from)?;
+        self.i2c.write_read(_MS8607::PT_ADDRESS, &cmd, &mut buffer).map_err(Error::from)?;
         
         let raw_temp = ((buffer[0] as u32) << 16) | ((buffer[1] as u32) << 8) | (buffer[2] as u32);
         delay.delay_ms(20);
         // Now read pressure
         cmd[0] = self.psensor_resolution_osr as u8 * 2;
         cmd[0] |= _MS8607::PSENSOR_START_PRESSURE_ADC_CONVERSION;
-        i2c.write(_MS8607::PT_ADDRESS, &cmd).map_err(Error::from)?;
+        self.i2c.write(_MS8607::PT_ADDRESS, &cmd).map_err(Error::from)?;
        
         // wait 18ms
         delay.delay_ms(20);
         buffer = [0u8; 3];
 
         cmd = [_MS8607::PSENSOR_READ_ADC];
-        i2c.write_read(_MS8607::PT_ADDRESS, &cmd, &mut buffer).map_err(Error::from)?;
+        self.i2c.write_read(_MS8607::PT_ADDRESS, &cmd, &mut buffer).map_err(Error::from)?;
         
         let raw_pressure =
             ((buffer[0] as u32) << 16) | ((buffer[1] as u32) << 8) | (buffer[2] as u32);
@@ -201,12 +216,11 @@ impl MS8607
     Pressure: 1008.94 hPa
     Relative Humidity: 25.94 %rH
     */
-    fn _read_humidity<I2C, E>(&mut self, i2c:&mut I2C) -> Result<(), Error<E>> where
-    I2C: Write<Error = E> + WriteRead<Error = E>, {
+    fn _read_humidity(&mut self) -> Result<(), Error<E>> {
         let mut buffer = [0u8; 3];
-        self.get_humidity_resolution(i2c)?;
+        self.get_humidity_resolution()?;
         let cmd = [Ms8607HumidityClockStretch::Ms8607I2cHold as u8];
-        i2c.write_read(_MS8607::HUM_ADDRESS, &cmd, &mut buffer).map_err(Error::from)?;
+        self.i2c.write_read(_MS8607::HUM_ADDRESS, &cmd, &mut buffer).map_err(Error::from)?;
         
         let raw_hum: u16 = (buffer[0] as u16) << 8 | (buffer[1] as u16);
         let crc = buffer[2];
@@ -279,10 +293,9 @@ impl MS8607
 
      Returns `Ok(())` if the write is successful, `Err("Failed to write to I2C")` if the I2C write fails
     */
-    fn _write_humidity_user_register<I2C, E>(&mut self,i2c:&mut I2C, new_reg_value: u8) -> Result<(), Error<E>> where
-    I2C: Write<Error = E> + WriteRead<Error = E>, {
+    fn _write_humidity_user_register(&mut self, new_reg_value: u8) -> Result<(), Error<E>>{
         let buffer = [_MS8607::HSENSOR_WRITE_USER_REG_COMMAND, new_reg_value];
-        i2c.write(_MS8607::HUM_ADDRESS, &buffer).map_err(Error::from)?;
+        self.i2c.write(_MS8607::HUM_ADDRESS, &buffer).map_err(Error::from)?;
         Ok(())
     }
 
@@ -294,13 +307,12 @@ impl MS8607
     ## Returns
     Returns the value of the user register as a `u8` if successful.
     */
-    fn _read_humidity_user_register<I2C, E>(&mut self, i2c:&mut I2C) -> Result<u8, Error<E>> where
-    I2C: Write<Error = E> + WriteRead<Error = E>, {
+    fn _read_humidity_user_register(&mut self) -> Result<u8, Error<E>> {
         let mut cmd = [_MS8607::HSENSOR_READ_USER_REG_COMMAND];
         let mut buffer = [0u8; 1];
 
 
-        i2c.write_read(_MS8607::HUM_ADDRESS, &cmd, &mut buffer).map_err(Error::from)?;
+        self.i2c.write_read(_MS8607::HUM_ADDRESS, &cmd, &mut buffer).map_err(Error::from)?;
         
         Ok(buffer[0])
     }
@@ -313,8 +325,7 @@ impl MS8607
 
     Returns an error if the CRC check of the retrieved data fails.
     */
-    fn _fetch_temp_calibration_values<I2C, E>(&mut self, i2c:&mut I2C) -> Result<(), Error<E>>where
-    I2C: Write<Error = E> + WriteRead<Error = E>, {
+    fn _fetch_temp_calibration_values(&mut self) -> Result<(), Error<E>> {
         let mut offset: u8 = 0;
         let mut buffer = [0u16; 8];
         let mut tmp_buffer = [0u8; 2];
@@ -326,7 +337,7 @@ impl MS8607
             .for_each(|(i, v)| {
                 offset = 2 * (i as u8);
                 let cmd = [_MS8607::PROM_ADDRESS_READ_ADDRESS_0 + offset];
-                let req = i2c.write_read(_MS8607::PT_ADDRESS, &cmd,&mut tmp_buffer);
+                let req = self.i2c.write_read(_MS8607::PT_ADDRESS, &cmd,&mut tmp_buffer);
                 if req.is_err() {
                     return;
                 }
@@ -366,7 +377,7 @@ impl MS8607
     let result = self._psensor_crc_check(&mut n_prom, crc);
     ```
     */
-    fn _psensor_crc_check<E>(&mut self, n_prom: &mut [u16; 8]) -> Result<(), Error<E>> {
+    fn _psensor_crc_check(&mut self, n_prom: &mut [u16; 8]) -> Result<(), Error<E>> {
         let mut n_rem = 0;
         let crc = ((n_prom[0] & 0xF000) >> 12) as u8;
         n_prom[0] &= 0x0FFF; // Mask off CRC bits
@@ -404,7 +415,7 @@ impl MS8607
     ## Returns
     `Ok(())` if the value is valid and `Err("CRC check failed")` if the value is not valid.
     */
-    fn _hsensor_crc_check<E>(&mut self, value: u16, crc: u8) -> Result<(), Error<E>> {
+    fn _hsensor_crc_check(&mut self, value: u16, crc: u8) -> Result<(), Error<E>> {
         let mut polynom: u32 = 0x988000; // x^8 + x^5 + x^4 + 1
         let mut msb: u32 = 0x800000;
         let mut mask: u32 = 0xFF8000;
@@ -428,23 +439,16 @@ impl MS8607
     }
 
     /// Reset the sensors to their initial state
-    pub fn reset<I2C,Delay, E>(&mut self, i2c:&mut I2C, delay: &mut Delay) -> Result<(), Error<E>> where
-    I2C: Write<Error = E> + WriteRead<Error = E>,Delay: DelayMs<u16> {
+    pub fn reset<Delay>(&mut self, delay: &mut Delay) -> Result<(), Error<E>> where Delay: DelayMs<u16> {
         let cmd = [_MS8607::P_T_RESET];
-        i2c.write(_MS8607::PT_ADDRESS, &cmd).map_err(Error::from)?;
+        self.i2c.write(_MS8607::PT_ADDRESS, &cmd).map_err(Error::from)?;
         
         let cmd = [_MS8607::HSENSOR_RESET_COMMAND];
-        i2c.write(_MS8607::HUM_ADDRESS, &cmd).map_err(Error::from)?;
+        self.i2c.write(_MS8607::HUM_ADDRESS, &cmd).map_err(Error::from)?;
         
         // wait 15ms
         delay.delay_ms(15);
         Ok(())
-    }
-}
-
-impl Default for MS8607 {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
